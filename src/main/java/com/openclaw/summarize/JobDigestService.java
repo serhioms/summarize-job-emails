@@ -87,8 +87,54 @@ public class JobDigestService {
         JobListing job = new JobListing();
         job.setTitle(subject);
         job.setRemote(body.toLowerCase().contains("remote"));
-        // TODO: Improve parsing for company, location, link
+
+        // Try to extract company (common patterns)
+        String company = extractCompany(subject, body);
+        if (!company.isEmpty()) job.setCompany(company);
+
+        // Try to extract location
+        String location = extractLocation(body);
+        if (!location.isEmpty()) job.setLocation(location);
+
+        // Try to extract apply link
+        String link = extractApplyLink(body);
+        if (!link.isEmpty()) job.setLink(link);
+
         return job;
+    }
+
+    private String extractCompany(String subject, String body) {
+        // Try subject first (e.g. "Software Engineer at Acme Corp")
+        if (subject.contains(" at ")) {
+            return subject.substring(subject.indexOf(" at ") + 4).trim();
+        }
+        // Fallback: look for common patterns in body
+        if (body.toLowerCase().contains("company:")) {
+            int idx = body.toLowerCase().indexOf("company:");
+            return body.substring(idx + 8, Math.min(idx + 40, body.length())).trim();
+        }
+        return "";
+    }
+
+    private String extractLocation(String body) {
+        String lower = body.toLowerCase();
+        if (lower.contains("location:")) {
+            int idx = lower.indexOf("location:");
+            return body.substring(idx + 9, Math.min(idx + 35, body.length())).trim();
+        }
+        if (lower.contains("remote")) return "Remote";
+        return "";
+    }
+
+    private String extractApplyLink(String body) {
+        // Simple URL extraction
+        if (body.contains("http")) {
+            int start = body.indexOf("http");
+            int end = body.indexOf(" ", start);
+            if (end == -1) end = Math.min(start + 200, body.length());
+            return body.substring(start, end).trim();
+        }
+        return "";
     }
 
     private List<JobListing> deduplicateJobs(List<JobListing> jobs) {

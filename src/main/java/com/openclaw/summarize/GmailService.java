@@ -40,15 +40,18 @@ public class GmailService {
 
     private Gmail gmailService;
 
-    public GmailService() {
-        try {
-            this.gmailService = getGmailService();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize Gmail service", e);
+    public Gmail getGmailService() {
+        if (gmailService == null) {
+            try {
+                gmailService = buildGmailService();
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to initialize Gmail service", e);
+            }
         }
+        return gmailService;
     }
 
-    public Gmail getGmailService() throws GeneralSecurityException, IOException {
+    private Gmail buildGmailService() throws GeneralSecurityException, IOException {
         final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
         return new Gmail.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
                 .setApplicationName(APPLICATION_NAME)
@@ -56,7 +59,8 @@ public class GmailService {
     }
 
     private Credential getCredentials(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
-        InputStream in = GmailService.class.getResourceAsStream(credentialsFile.replace("classpath:", "/"));
+        String resourcePath = credentialsFile.replace("classpath:", "/");
+        InputStream in = GmailService.class.getResourceAsStream(resourcePath);
         if (in == null) {
             throw new FileNotFoundException("Resource not found: " + credentialsFile);
         }
@@ -73,12 +77,8 @@ public class GmailService {
         return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
     }
 
-    public Message getMessage(String id) throws IOException {
-        return gmailService.users().messages().get("me", id).setFormat("full").execute();
-    }
-
     public List<Message> fetchJobAlerts() throws IOException {
-        ListMessagesResponse response = gmailService.users().messages()
+        ListMessagesResponse response = getGmailService().users().messages()
                 .list("me")
                 .setQ("subject:(Java OR Spring OR \"Software Engineer\") newer_than:7d")
                 .setMaxResults(50L)
@@ -86,5 +86,9 @@ public class GmailService {
 
         List<Message> messages = response.getMessages();
         return messages != null ? messages : new ArrayList<>();
+    }
+
+    public Message getMessage(String id) throws IOException {
+        return getGmailService().users().messages().get("me", id).setFormat("full").execute();
     }
 }
