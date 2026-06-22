@@ -1,5 +1,7 @@
 package com.openclaw.summarize;
 
+import java.util.*;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -15,6 +17,7 @@ import java.util.stream.Collectors;
 public class JobDigestService {
 
     private final JavaMailSender mailSender;
+    private final GmailService gmailService;
 
     @Value("${spring.mail.username:}")
     private String mailFrom;
@@ -22,8 +25,9 @@ public class JobDigestService {
     @Value("${job-digest.recipients:}")
     private List<String> recipients;
 
-    public JobDigestService(JavaMailSender mailSender) {
+    public JobDigestService(JavaMailSender mailSender, GmailService gmailService) {
         this.mailSender = mailSender;
+        this.gmailService = gmailService;
     }
 
     public void runWeeklyJobDigest() {
@@ -39,9 +43,52 @@ public class JobDigestService {
     }
 
     private List<JobListing> fetchJobAlertsFromGmail() {
-        // TODO: Replace with real Gmail API integration
-        // For now returns empty list
-        return new ArrayList<>();
+        try {
+            List<com.google.api.services.gmail.model.Message> messages = gmailService.fetchJobAlerts();
+            List<JobListing> jobs = new ArrayList<>();
+
+            for (com.google.api.services.gmail.model.Message msg : messages) {
+                com.google.api.services.gmail.model.Message fullMsg = gmailService.getGmailService().users().messages()
+                        .get("me", msg.getId()).setFormat("full").execute();
+
+                String subject = getHeader(fullMsg, "Subject");
+                String body = getEmailBody(fullMsg);
+
+                JobListing job = parseJobFromEmail(subject, body);
+                if (job != null) {
+                    jobs.add(job);
+                }
+            }
+            return jobs;
+        } catch (Exception e) {
+            System.err.println("Failed to fetch emails from Gmail: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    private String getHeader(com.google.api.services.gmail.model.Message message, String name) {
+        for (com.google.api.services.gmail.model.MessagePartHeader header : message.getPayload().getHeaders()) {
+            if (header.getName().equalsIgnoreCase(name)) {
+                return header.getValue();
+            }
+        }
+        return "";
+    }
+
+    private String getEmailBody(com.google.api.services.gmail.model.Message message) {
+        // Simple body extraction
+        if (message.getPayload().getBody().getData() != null) {
+            return new String(java.util.Base64.getUrlDecoder().decode(message.getPayload().getBody().getData()));
+        }
+        return "";
+    }
+
+    private JobListing parseJobFromEmail(String subject, String body) {
+        JobListing job = new JobListing();
+        job.setTitle(subject);
+        job.setRemote(body.toLowerCase().contains("remote"));
+        // TODO: Improve parsing for company, location, link
+        return job;
     }
 
     private List<JobListing> deduplicateJobs(List<JobListing> jobs) {
@@ -51,8 +98,10 @@ public class JobDigestService {
     }
 
     private List<JobListing> verifyActive(List<JobListing> jobs) {
-        // TODO: Check if job links are still active
-        return jobs;
+        // Simple verification - keep jobs that have a link
+        return jobs.stream()
+                .filter(j -> j.getLink() != null && !j.getLink().isEmpty())
+                .collect(Collectors.toList());
     }
 
     private List<JobListing> filterFullyRemote(List<JobListing> jobs) {
@@ -62,8 +111,14 @@ public class JobDigestService {
     }
 
     private List<JobListing> rankByRelevance(List<JobListing> jobs) {
-        // TODO: Rank traditional Java/Spring Boot roles higher
-        return jobs;
+        // Simple ranking: jobs with "Java" or "Spring" in title come first
+        return jobs.stream()
+                .sorted((a, b) -> {
+                    boolean aHasJava = a.getTitle().toLowerCase().contains("java") || a.getTitle().toLowerCase().contains("spring");
+                    boolean bHasJava = b.getTitle().toLowerCase().contains("java") || b.getTitle().toLowerCase().contains("spring");
+                    return Boolean.compare(bHasJava, aHasJava);
+                })
+                .collect(Collectors.toList());
     }
 
     private void sendDigestEmail(List<JobListing> jobs) {
