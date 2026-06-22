@@ -14,6 +14,7 @@ import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.GmailScopes;
 import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.FileNotFoundException;
@@ -29,9 +30,13 @@ public class GmailService {
 
     private static final String APPLICATION_NAME = "Summarize Job Emails";
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
-    private static final String TOKENS_DIRECTORY_PATH = "tokens";
     private static final List<String> SCOPES = List.of(GmailScopes.GMAIL_READONLY);
-    private static final String CREDENTIALS_FILE_PATH = "/credentials.json";
+
+    @Value("${gmail.credentials-file:classpath:credentials.json}")
+    private String credentialsFile;
+
+    @Value("${gmail.tokens-directory:tokens}")
+    private String tokensDirectory;
 
     private Gmail gmailService;
 
@@ -51,16 +56,16 @@ public class GmailService {
     }
 
     private Credential getCredentials(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
-        InputStream in = GmailService.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
+        InputStream in = GmailService.class.getResourceAsStream(credentialsFile.replace("classpath:", "/"));
         if (in == null) {
-            throw new FileNotFoundException("Resource not found: " + CREDENTIALS_FILE_PATH);
+            throw new FileNotFoundException("Resource not found: " + credentialsFile);
         }
 
         GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
 
         GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
                 HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
-                .setDataStoreFactory(new FileDataStoreFactory(new java.io.File(TOKENS_DIRECTORY_PATH)))
+                .setDataStoreFactory(new FileDataStoreFactory(new java.io.File(tokensDirectory)))
                 .setAccessType("offline")
                 .build();
 
