@@ -15,7 +15,7 @@ public class JobDigestScheduler {
     }
 
     // Run every Wednesday at 9:00 AM Toronto time
-    @Scheduled(cron = "0 9 * * 3", zone = "America/Toronto")
+    @Scheduled(cron = "0 0 9 * * 3", zone = "America/Toronto")
     public void runWeeklyDigest() {
         jobDigestService.runWeeklyJobDigest();
     }
