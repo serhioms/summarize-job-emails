@@ -19,6 +19,9 @@ public class JobDigestService {
     @Value("${spring.mail.username:}")
     private String mailFrom;
 
+    @Value("${job-digest.recipients:}")
+    private List<String> recipients;
+
     public JobDigestService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
     }
@@ -69,7 +72,7 @@ public class JobDigestService {
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
             helper.setFrom(mailFrom);
-            helper.setTo("sergey.moskovskiy@gmail.com", "igorart7@gmail.com");
+            helper.setTo(recipients.toArray(new String[0]));
             helper.setSubject("Weekly fully remote Java jobs — " + java.time.LocalDate.now());
 
             StringBuilder body = new StringBuilder();
