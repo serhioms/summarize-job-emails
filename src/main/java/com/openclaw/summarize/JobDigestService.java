@@ -23,7 +23,7 @@ public class JobDigestService {
     @Value("${spring.mail.username:}")
     private String mailFrom;
 
-    @Value("${job-digest.recipients:sergey.moskovskiy@gmail.com,igorart7@gmail.com}")
+    @Value("${job-digest.recipients:}")
     private List<String> recipients = List.of("sergey.moskovskiy@gmail.com", "igorart7@gmail.com");
 
     public JobDigestService(JavaMailSender mailSender, GmailService gmailService) {
@@ -209,6 +209,7 @@ public class JobDigestService {
                     job.setStatus("Unverified");
                 }
             } catch (Exception e) {
+                e.printStackTrace();
                 job.setStatus("Unverified");
             }
         }

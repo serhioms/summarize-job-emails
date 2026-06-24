@@ -32,6 +32,9 @@ public class GmailService {
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private static final List<String> SCOPES = List.of(GmailScopes.GMAIL_READONLY);
 
+    @Value("${job-digest.user:}")
+    private String user;
+
     @Value("${gmail.credentials-file:classpath:credentials.json}")
     private String credentialsFile;
 
@@ -74,14 +77,14 @@ public class GmailService {
                 .build();
 
         LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort(8888).build();
-        return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
+        return new AuthorizationCodeInstalledApp(flow, receiver).authorize(user);
     }
 
     public List<Message> fetchJobAlerts(String query) throws IOException {
         ListMessagesResponse response = getGmailService().users().messages()
                 .list("me")
                 .setQ(query)
-                .setMaxResults(80L)
+                .setMaxResults(100L)
                 .execute();
 
         List<Message> messages = response.getMessages();
