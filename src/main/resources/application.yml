@@ -12,6 +12,8 @@ spring:
             enable: true
 
 job-digest:
+  file-prefix: job-links
+  user: sergey.moskovskiy@gmail.com
   recipients: sergey.moskovskiy@gmail.com
 
 gmail:

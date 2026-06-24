@@ -1,7 +1,6 @@
 package com.openclaw.summarize;
 
 import io.micrometer.common.util.StringUtils;
-import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,16 +21,22 @@ public class JobDigestService {
 
     private final JavaMailSender mailSender;
     private final GmailService gmailService;
+    private final FileService fileService;
+
 
     @Value("${spring.mail.username:}")
     private String mailFrom;
 
+    @Value("${job-digest.file-prefix:}")
+    String filePrefix;
+
     @Value("${job-digest.recipients:}")
     private List<String> recipients;
 
-    public JobDigestService(JavaMailSender mailSender, GmailService gmailService) {
+    public JobDigestService(JavaMailSender mailSender, GmailService gmailService, FileService fileService) {
         this.mailSender = mailSender;
         this.gmailService = gmailService;
+        this.fileService = fileService;
     }
 
     public void runWeeklyJobDigest() {
@@ -140,7 +145,6 @@ public class JobDigestService {
         JobListing job = new JobListing();
         job.setTitle(clean(subject));
         job.setSourceDate(date);
-        job.setRawBody(body);
 
         // Extract company
         String company = extractCompany(subject, body);
@@ -150,21 +154,7 @@ public class JobDigestService {
         String link = extractApplyLink(body);
         job.setLink(link);
 
-        // Extract compensation
-        String comp = extractCompensation(body);
-        job.setCompensation(comp.isEmpty() ? "Not stated" : comp);
-
-        // Extract employment type
-        String empType = extractEmploymentType(body);
-        job.setEmploymentType(empType.isEmpty() ? "Not stated" : empType);
-
-        // Extract remote wording
-        String remoteWording = extractRemoteWording(body);
-        job.setRemoteWording(remoteWording);
-
-        // Extract stack
-        String stack = extractStack(body);
-        job.setKeyStack(stack.isEmpty() ? "Not stated" : stack);
+        populateJobFields(job, body);
 
         return job;
     }
@@ -238,55 +228,150 @@ public class JobDigestService {
     }
 
     private List<JobListing> verifyLiveStatus(List<JobListing> jobs) {
+
+        List<String> error = fileService.readRows(filePrefix +".error.txt");
+        List<String> closed = fileService.readRows(filePrefix +".closed.txt");
+        List<String> skip = fileService.readRows(filePrefix +".skip.txt");
+        List<String> active = fileService.readRows(filePrefix +".active.txt");
+
         List<JobListing> result = new ArrayList<>();
+
+        int errorcount = 0;
+        int errorsleep = 30;
+        int processed = 30;
+
+        String jobid = "", link = "";
+
+        System.out.println("Verifying jobs: "+jobs.size());
+
+
         for (JobListing job : jobs) {
-            if (job.getLink() == null || job.getLink().isEmpty()) {
-                job.setStatus("Unverified");
-                continue;
-            }
             try {
+                processed++;
 
-                Connection.Response response = Jsoup.connect("https://www.linkedin.com")
-                        .userAgent("Mozilla/5.0")
-                        .ignoreHttpErrors(true)
-                        .execute();
+                if (job.getLink() == null || job.getLink().isEmpty()) {
+                    job.setStatus("Unverified");
+                    continue;
+                }
 
-                System.out.println(response.statusCode());
+                jobid = null;
+                link = job.getLink();
 
-                for (Map.Entry<String, String> h : response.headers().entrySet()) {
-                    System.out.println(h.getKey() + ": " + h.getValue());
+                jobid = extractJobId(link);
+                if( jobid == null ){
+                    System.out.println("Skip: " + link);
+                    skip.add(link);
+                    fileService.saveRows(skip, filePrefix +".skip.txt");
+                    continue;
                 }
 
 
-                Document doc = Jsoup.connect(job.getLink())
+                if( closed.contains(jobid) ){
+                    job.setStatus("Closed");
+                    System.out.println("Already processed: Closed: "+jobid+": "+link);
+                    continue;
+                } else if( active.contains(jobid) ){
+                    job.setStatus("Active");
+                    System.out.println("Already processed: Active: "+jobid+": "+link);
+                    continue;
+                } else if( error.contains(jobid) ){
+                    job.setStatus("Unverified");
+                    System.out.println("Already processed: Error: "+jobid+": "+link);
+                    continue;
+                }
+
+                Document doc = Jsoup.connect("https://www.linkedin.com/jobs/view/"+jobid)
                         .userAgent("Mozilla/5.0")
-                        .timeout(60000)
+                        .timeout(30000)
                         .get();
 
-
-
                 String text = doc.text().toLowerCase();
+
+                populateJobFields(job, text);
+
                 if (text.contains("application closed") || text.contains("position filled") ||
-                    text.contains("no longer accepting") || text.contains("job not found")) {
+                    text.contains("no longer accepting") || text.contains("job not found") ||
+                        text.contains("No longer accepting applications")) {
                     job.setStatus("Closed");
+                    closed.add(jobid);
                 } else if (doc.select("form, button, a[href*=apply]").size() > 0 ||
                            text.contains("apply now") || text.contains("submit application")) {
                     job.setStatus("Active");
                     result.add(job);
+                    active.add(jobid);
                 } else {
                     job.setStatus("Unverified");
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-                job.setStatus("Unverified");
+
+                errorcount = 0;
+
                 try {
-                    TimeUnit.MINUTES.sleep(5);
+                    TimeUnit.SECONDS.sleep(errorsleep);
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
                 }
+            } catch (Exception e) {
+                e.printStackTrace();
+                System.out.println("Error: "+link);
+
+                job.setStatus("Unverified");
+                errorsleep += 30;
+
+                error.add(jobid);
+
+                fileService.saveRows(error, filePrefix +".error.txt");
+                fileService.saveRows(closed, filePrefix +".closed.txt");
+                fileService.saveRows(active, filePrefix +".active.txt");
+
+                try {
+                    TimeUnit.SECONDS.sleep(errorsleep);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                }
+                if( errorcount++ > 2 ) {
+                    break;
+                }
+            } finally {
+                System.out.println("Processed jobs: "+processed+" out of "+jobs.size());
             }
         }
+
+        fileService.saveRows(closed, filePrefix +".closed.txt");
+        fileService.saveRows(active, filePrefix +".active.txt");
+
         return result;
+    }
+
+    private String extractJobId(String link) {
+        String[] linksplit = link.split("jobid_|_ssid");
+        if( linksplit.length < 2 ){
+            linksplit = link.split("/view/|/\\?");
+            if( linksplit.length < 2 ) {
+                return null;
+            }
+        }
+        return linksplit[1];
+    }
+
+    private void populateJobFields(JobListing job, String text) {
+        // Extract body
+        job.setRawBody(text);
+
+        // Extract compensation
+        String comp = extractCompensation(text);
+        job.setCompensation(comp.isEmpty() ? "Not stated" : comp);
+
+        // Extract employment type
+        String empType = extractEmploymentType(text);
+        job.setEmploymentType(empType.isEmpty() ? "Not stated" : empType);
+
+        // Extract remote wording
+        String remoteWording = extractRemoteWording(text);
+        job.setRemoteWording(remoteWording);
+
+        // Extract stack
+        String stack = extractStack(text);
+        job.setKeyStack(stack.isEmpty() ? "Not stated" : stack);
     }
 
     private List<JobListing> filterFullyRemote(List<JobListing> jobs) {
