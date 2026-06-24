@@ -12,9 +12,7 @@ spring:
             enable: true
 
 job-digest:
-  user: sergey.moskovskiy@gmail.com
-  recipients:
-    - "sergey.moskovskiy@gmail.com"
+  recipients: sergey.moskovskiy@gmail.com
 
 gmail:
   credentials-file: classpath:credentials.json

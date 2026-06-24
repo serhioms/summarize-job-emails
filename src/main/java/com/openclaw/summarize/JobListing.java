@@ -6,7 +6,7 @@ public class JobListing {
     private String company;
     private String location;
     private String link;
-    private boolean isRemote;
+    private Boolean isRemote;
     private String source;
     private String sourceDate;
     private String rawBody;
@@ -29,8 +29,8 @@ public class JobListing {
     public String getLink() { return link; }
     public void setLink(String link) { this.link = link; }
 
-    public boolean isRemote() { return isRemote; }
-    public void setRemote(boolean remote) { isRemote = remote; }
+    public Boolean isRemote() { return isRemote; }
+    public void setRemote(Boolean remote) { isRemote = remote; }
 
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }

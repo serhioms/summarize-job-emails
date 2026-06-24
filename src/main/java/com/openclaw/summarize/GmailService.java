@@ -91,10 +91,6 @@ public class GmailService {
         return messages != null ? messages : new ArrayList<>();
     }
 
-    public List<Message> fetchJobAlerts() throws IOException {
-        return fetchJobAlerts("subject:(Java OR \"Spring Boot\" OR \"Software Engineer\") newer_than:14d");
-    }
-
     public Message getMessage(String id) throws IOException {
         return getGmailService().users().messages().get("me", id).setFormat("full").execute();
     }

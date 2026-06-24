@@ -1,5 +1,7 @@
 package com.openclaw.summarize;
 
+import io.micrometer.common.util.StringUtils;
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +14,7 @@ import jakarta.mail.internet.MimeMessage;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -24,7 +27,7 @@ public class JobDigestService {
     private String mailFrom;
 
     @Value("${job-digest.recipients:}")
-    private List<String> recipients = List.of("sergey.moskovskiy@gmail.com", "igorart7@gmail.com");
+    private List<String> recipients;
 
     public JobDigestService(JavaMailSender mailSender, GmailService gmailService) {
         this.mailSender = mailSender;
@@ -32,7 +35,7 @@ public class JobDigestService {
     }
 
     public void runWeeklyJobDigest() {
-        int lookbackDays = 14;
+        int lookbackDays = 15;
         List<JobListing> candidates = fetchJobAlertsFromGmail(lookbackDays);
 
         if (candidates.size() < 3) {
@@ -49,6 +52,7 @@ public class JobDigestService {
     }
 
     private List<JobListing> fetchJobAlertsFromGmail(int days) {
+        List<JobListing> jobs = new ArrayList<>();
         try {
             String query = String.format(
                 "(subject:(Java OR \"Spring Boot\" OR \"Software Engineer\" OR \"Backend Engineer\") " +
@@ -57,7 +61,6 @@ public class JobDigestService {
             );
 
             List<com.google.api.services.gmail.model.Message> messages = gmailService.fetchJobAlerts(query);
-            List<JobListing> jobs = new ArrayList<>();
 
             for (com.google.api.services.gmail.model.Message msg : messages) {
                 com.google.api.services.gmail.model.Message fullMsg = gmailService.getMessage(msg.getId());
@@ -66,16 +69,66 @@ public class JobDigestService {
                 String body = getEmailBody(fullMsg);
                 String date = getHeader(fullMsg, "Date");
 
-                JobListing job = parseJobFromEmail(subject, body, date);
-                if (job != null && isTargetRole(job)) {
-                    jobs.add(job);
+                if (body == null ) {
+                    continue;
+                } else if( skipEmail("Here is the final shortlist", body) ){
+                    continue;
+                } else if( parseLinkedInJobs("Your job alert for", subject, body, date, jobs)
+                    || parseLinkedInJobs("Jobs similar to", subject, body, date, jobs)
+                    || parseLinkedInJobs("Top job picks for you:", subject, body, date, jobs)
+                    ){
+                    continue;
+                } else {
+                    JobListing job = parseJobFromEmail(subject, body, date);
+                    if (job != null && isTargetRole(job)) {
+                        jobs.add(job);
+                    }
                 }
             }
-            return jobs;
+
         } catch (Exception e) {
             System.err.println("Failed to fetch Gmail: " + e.getMessage());
-            return new ArrayList<>();
+            e.printStackTrace();
         }
+        return jobs;
+    }
+
+    private boolean skipEmail(String hereIsTheFinalShortlist, String body) {
+        return body.contains(hereIsTheFinalShortlist);
+    }
+
+    private boolean parseLinkedInJobs(String mark, String subject, String body, String date, List<JobListing> jobs) {
+        if( !body.contains(mark) ){
+            return false;
+        }
+        String[] parse = body.split("\r\n");
+        if( parse.length < 2 ){
+            return false;
+        }
+        subject = parse[0];
+        try {
+            String[] parts = body.split("---------------------------------------------------------");
+            for (String part : parts) {
+                if (part.contains("----------------------------------------")) {
+                    return true;
+                }
+                String[] details = part.split("\r\n");
+
+                JobListing job = new JobListing();
+                int index = StringUtils.isEmpty(details[1].trim())? 3: 1;
+                job.setTitle(details[index++]); // 1,3
+                job.setCompany(details[index++]); // 2,4
+                job.setLocation(details[index++]); // 3,5
+                job.setLink(details[details.length-1].split("View job: ")[1]);
+                job.setSource(subject);
+                job.setSourceDate(date);
+
+                jobs.add(job);
+            }
+        } catch(Throwable t) {
+            t.printStackTrace();
+        }
+        return true;
     }
 
     private boolean isTargetRole(JobListing job) {
@@ -192,10 +245,25 @@ public class JobDigestService {
                 continue;
             }
             try {
+
+                Connection.Response response = Jsoup.connect("https://www.linkedin.com")
+                        .userAgent("Mozilla/5.0")
+                        .ignoreHttpErrors(true)
+                        .execute();
+
+                System.out.println(response.statusCode());
+
+                for (Map.Entry<String, String> h : response.headers().entrySet()) {
+                    System.out.println(h.getKey() + ": " + h.getValue());
+                }
+
+
                 Document doc = Jsoup.connect(job.getLink())
                         .userAgent("Mozilla/5.0")
-                        .timeout(8000)
+                        .timeout(60000)
                         .get();
+
+
 
                 String text = doc.text().toLowerCase();
                 if (text.contains("application closed") || text.contains("position filled") ||
@@ -211,6 +279,11 @@ public class JobDigestService {
             } catch (Exception e) {
                 e.printStackTrace();
                 job.setStatus("Unverified");
+                try {
+                    TimeUnit.MINUTES.sleep(5);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                }
             }
         }
         return result;
@@ -321,11 +394,22 @@ public class JobDigestService {
 
     private String getEmailBody(com.google.api.services.gmail.model.Message message) {
         try {
-            if (message.getPayload().getBody().getData() != null) {
+            if (message.getPayload().getParts() != null) {
+                for (var part : message.getPayload().getParts()) {
+                    if (part.getBody().getData() != null) {
+                        if( "text/plain".equals(part.getMimeType()) ){ // skip html
+                            return new String(java.util.Base64.getUrlDecoder().decode(part.getBody().getData()));
+                        }
+                    }
+                }
+            } else if ( "text/plain".equals(message.getPayload().getMimeType()) ) {
                 return new String(java.util.Base64.getUrlDecoder().decode(message.getPayload().getBody().getData()));
+            } else if ( "text/html".equals(message.getPayload().getMimeType()) ) {
+                return null;
+                // return new String(java.util.Base64.getUrlDecoder().decode(message.getPayload().getBody().getData()));
             }
         } catch (Exception ignored) {}
-        return "";
+        return null;
     }
 
     private String clean(String s) {
