@@ -40,11 +40,11 @@ public class JobDigestService {
     }
 
     public void runWeeklyJobDigest() {
-        int lookbackDays = 15;
+        int lookbackDays = 30;
         List<JobListing> candidates = fetchJobAlertsFromGmail(lookbackDays);
 
         if (candidates.size() < 3) {
-            lookbackDays = 30;
+            lookbackDays = 60;
             candidates = fetchJobAlertsFromGmail(lookbackDays);
         }
 
@@ -232,7 +232,7 @@ public class JobDigestService {
         List<String> error = fileService.readRows(filePrefix +".error.txt");
         List<String> closed = fileService.readRows(filePrefix +".closed.txt");
         List<String> skip = fileService.readRows(filePrefix +".skip.txt");
-        List<String> active = fileService.readRows(filePrefix +".active.txt");
+        List<String> active = new ArrayList<>(1000); // fileService.readRows(filePrefix +".active.txt");
 
         List<JobListing> result = new ArrayList<>();
 
@@ -312,7 +312,9 @@ public class JobDigestService {
                 }
             } catch (Exception e) {
                 e.printStackTrace();
+                System.err.flush();
                 System.out.println("Error: "+link);
+                System.out.flush();
 
                 job.setStatus("Unverified");
                 errorsleep += 30;
