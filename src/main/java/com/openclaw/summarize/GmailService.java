@@ -45,7 +45,6 @@ public class GmailService {
             try {
                 gmailService = buildGmailService();
             } catch (Exception e) {
-                e.printStackTrace();
                 throw new RuntimeException("Failed to initialize Gmail service", e);
             }
         }
@@ -78,15 +77,19 @@ public class GmailService {
         return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
     }
 
-    public List<Message> fetchJobAlerts() throws IOException {
+    public List<Message> fetchJobAlerts(String query) throws IOException {
         ListMessagesResponse response = getGmailService().users().messages()
                 .list("me")
-                .setQ("subject:(Java OR Spring OR \"Software Engineer\") newer_than:7d")
-                .setMaxResults(50L)
+                .setQ(query)
+                .setMaxResults(80L)
                 .execute();
 
         List<Message> messages = response.getMessages();
         return messages != null ? messages : new ArrayList<>();
+    }
+
+    public List<Message> fetchJobAlerts() throws IOException {
+        return fetchJobAlerts("subject:(Java OR \"Spring Boot\" OR \"Software Engineer\") newer_than:14d");
     }
 
     public Message getMessage(String id) throws IOException {
